@@ -6,16 +6,25 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
-
-//int strcmp(const char *s1, const char *s2);
-
+#include "strace.h" //Includes the size of the buffer
 
 
+// Circular buffer to store system call events
+struct strace_event strace_buffer[N];
+int strace_buffer_index = 0; // Points to the current index in the buffer
 
+void log_strace_event(int pid, const char *name, const char *syscall, int retval) {
+    struct strace_event *event = &strace_buffer[strace_buffer_index];
 
-// void trace_syscall(struct proc *p, int syscall_num, int return_value) {
+    // Update the circular buffer index
+    strace_buffer_index = (strace_buffer_index + 1) % N;
 
-// }
+    // Populate the event structure
+    event->pid = pid;
+    safestrcpy(event->name, name, sizeof(event->name));
+    safestrcpy(event->syscall, syscall, sizeof(event->syscall));
+    event->retval = retval;
+}
 
 struct {
   struct spinlock lock;
@@ -59,6 +68,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  //p->strace_flag = 0; //Initialize strace flag
 
   release(&ptable.lock);
 
@@ -168,6 +178,10 @@ fork(void)
   np->sz = proc->sz;
   np->parent = proc;
   *np->tf = *proc->tf;
+  //np->strace_flag = proc->strace_flag; //Inherit strace flag
+  // np->strace_state = proc->strace_state; //Inherit strace state
+
+
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -230,10 +244,11 @@ exit(void)
   }
 
   // Log the exit system call if tracing is enabled
-  if(proc->strace_enabled) {
+  if(proc->strace_flag) {
     cprintf("TRACE: pid = %d | command_name = %s | syscall = exit\n",
             proc->pid, proc->name);
   }
+
 
   // Jump into the scheduler, never to return.
   proc->state = ZOMBIE;
