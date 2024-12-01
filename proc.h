@@ -1,4 +1,3 @@
-#define MAX_SYSCALL_NAME 16 
 // Per-CPU state
 struct cpu {
   uchar apicid;                // Local APIC ID
@@ -49,12 +48,7 @@ struct context {
 
 enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
-// struct syscall_event {
-//     int pid;
-//     char command_name[MAXPROCNAME];
-//     char syscall_name[MAX_SYSCALL_NAME];
-//     int return_value;
-// };
+#include "strace.h"
 
 // Per-process state
 struct proc {
@@ -71,10 +65,8 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
-  int strace_enabled;          // New flag to track if strace is enabled for this process
-  //struct syscall_event syscalls[N] // Circular buffer for syscall events
-  //int syscall_index;            // Current index in the buffer
-
+  int strace_flag;             // Strace flag
+  struct strace_state strace_state; // Strace state
 };
 
 // Process memory is laid out contiguously, low addresses first:
