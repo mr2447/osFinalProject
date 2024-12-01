@@ -6,17 +6,35 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
-// Implement the sys_trace function
+#include "strace.h"
+
 
 int sys_strace(void) {
-  int enable;
+    int mode;
 
-  // Get the argument (0 or 1 for )
-  if (argint(0, &enable) < 0)
-      return -1;
-  proc->strace_enabled = enable;
+    // Retrieve the argument (0 for off, 1 for on)
+    if (argint(0, &mode) < 0) {
+        return -1; // Error in retrieving argument
+    }
 
-  return 0;
+    // Set the global strace mode
+    proc->strace_flag = mode;
+    // cprintf("strace flag sysproc: %d\n", proc->strace_flag);
+    // cprintf("proc->pid: %d\n", proc->pid);
+    return 0; // Success
+}
+
+int sys_strace_dump(void) {
+    // Print all events in the circular buffer
+    int i;
+    for (i = 0; i < N; i++) {
+        struct strace_event *event = &strace_buffer[i];
+        if (event->pid != 0) { // Check if the slot is populated
+            cprintf("TRACE: pid = %d | command_name = %s | syscall = %s | return value = %d\n",
+                    event->pid, event->name, event->syscall, event->retval);
+        }
+    }
+    return 0; // Success
 }
 
 int
