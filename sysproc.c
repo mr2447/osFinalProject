@@ -18,9 +18,37 @@ int sys_strace(void) {
     }
 
     // Set the global strace mode
+    proc->parent->strace_flag = mode;
     proc->strace_flag = mode;
     // cprintf("strace flag sysproc: %d\n", proc->strace_flag);
     // cprintf("proc->pid: %d\n", proc->pid);
+    return 0; // Success
+}
+
+int sys_strace_option(void){
+    int option;
+    int syscall_filter_id;
+    int option_call;
+
+    // Retrieve the argument (0 for off, 1 for on)
+    if (argint(0, &option) < 0) {
+        return -1; // Error in retrieving argument
+    }
+
+    if (argint(1, &syscall_filter_id) < 0) {
+        return -1; // Error in retrieving argument
+    }
+
+    if (argint(2, &option_call) < 0) {
+        return -1; // Error in retrieving argument
+    }
+
+
+    // Set the global strace mode
+    proc->parent->strace_option.active_option = option;
+    proc->parent->strace_option.syscall_filter_id = syscall_filter_id;
+    proc->parent->strace_option.option_call = option_call;
+    proc->strace_option.option_call = option_call;
     return 0; // Success
 }
 
