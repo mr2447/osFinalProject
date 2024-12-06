@@ -11,10 +11,11 @@
 
 #define N 100 // Number of events in the circular buffer
 
-// Struct for per-process tracing state
-struct strace_state {
+// Struct for per-process tracing option
+struct strace_option {
     int active_option;          // Current active option ('e', 's', 'f', or 0)
     int syscall_filter_id;      // Syscall number to filter for -e
+    int option_call;            // If this is the option call then 1 else 0
 };
 
 // Struct for logging system call events
@@ -31,9 +32,7 @@ extern int strace_buffer_index;
 extern char* syscall_filter_name;
 
 // Function prototypes
-void parse_options(int argc, char **argv, struct strace_state *state);
 int syscall_number_from_name(const char *name);
-int should_log_syscall(int syscall_num, int retval, const struct strace_state *state);
 void log_strace_event(int pid, const char *name, const char *syscall, int retval);
 
 #endif // STRACE_H
