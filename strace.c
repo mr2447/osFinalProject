@@ -15,25 +15,26 @@ static struct syscall_map syscall_table[] = {
     {"exit", 2},
     {"wait", 3},
     {"pipe", 4},
-    {"write", 5},
-    {"read", 6},
-    {"close", 7},
-    {"kill", 8},
-    {"exec", 9},
-    {"open", 10},
-    {"mknod", 11},
-    {"unlink", 12},
-    {"fstat", 13},
-    {"link", 14},
-    {"mkdir", 15},
-    {"chdir", 16},
-    {"dup", 17},
-    {"getpid", 18},
-    {"sbrk", 19},
-    {"sleep", 20},
-    {"uptime", 21},
+    {"read", 5},
+    {"kill", 6},
+    {"exec", 7},
+    {"fstat", 8},
+    {"chdir", 9},
+    {"dup", 10},
+    {"getpid", 11},
+    {"sbrk", 12},
+    {"sleep", 13},
+    {"uptime", 14},
+    {"open", 15},
+    {"write", 16},
+    {"mknod", 17},
+    {"unlink", 18},
+    {"link", 19},
+    {"mkdir", 20},
+    {"close", 21},
     {"strace", 22}, // Add your custom syscall number here
     {"strace_dump", 23}, // Add your custom dump syscall number here
+    {"strace_option", 24}, // Add your custom option syscall number here
     {0, -1} // Sentinel value
 };
 
@@ -47,25 +48,6 @@ int syscall_number_from_name(const char *name) {
     return -1; // Return -1 if the name is not found
 }
 
-void parse_options(int argc, char **argv, struct strace_state *state) {
-    state->active_option = STRACE_OPTION_NONE;   // Reset active option
-    state->syscall_filter_id = -1;               // Reset filter
-
-    int i;
-    for (i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) {
-            state->active_option = STRACE_OPTION_FILTER;
-            state->syscall_filter_id = syscall_number_from_name(argv[++i]);
-            break;
-        } else if (strcmp(argv[i], "-s") == 0) {
-            state->active_option = STRACE_OPTION_SUCCESS;
-            break;
-        } else if (strcmp(argv[i], "-f") == 0) {
-            state->active_option = STRACE_OPTION_FAIL;
-            break;
-        }
-    }
-}
 
 void usage() {
     printf(1,"Usage:\n");
@@ -77,42 +59,45 @@ void usage() {
 }
 
 int main(int argc, char *argv[]) {
-    struct strace_state state; // Store parsed options
+    //struct strace_option option; // Store parsed options
     // static int temporary_override = 0; // Tracks temporary overrides
-
+   
 
     if (argc < 2) {
         usage();
         exit();
     }
 
-
-    // if (temporary_override) {
-    //     // Handle the next command after a temporary override
-    //     int pid = fork();
-    //     if (pid == 0) {
-    //         // Child process: Apply the tracing state and execute the command
-    //         strace_set_options(&state); // Pass temporary tracing state to kernel
-    //         exec(argv[1], &argv[1]);
-    //         printf(2, "Error: exec failed\n");
-    //         exit();
-    //     } else if (pid > 0) {
-    //         // Parent process: Wait for the child to complete
-    //         wait();
-
-    //         // Clear the temporary override after the command
-    //         temporary_override = 0;
-    //         state.active_option = STRACE_OPTION_NONE;
-    //         state.syscall_filter_id = -1;
-    //         strace_set_options(&state); // Reset tracing state
-    //     } else {
-    //         printf(2, "Error: Failed to fork process\n");
-    //     }
-    //     exit();
-    // }
-
     // Parse options
-    parse_options(argc, argv, &state);
+    int i;
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) {
+           int active_option = STRACE_OPTION_FILTER;
+            int syscall_filter_id = syscall_number_from_name(argv[++i]);
+            int option_call = 1;
+            int pid = fork();
+            if (pid == 0) {
+                strace_option(active_option, syscall_filter_id, option_call);
+                exec(argv[2], &argv[2]);
+                printf(1,"exec failed\n");
+                exit();
+            }
+            else {
+                wait();
+            }
+            //strace_option(active_option, syscall_filter_id, option_call);
+            //exit();
+        } else if (strcmp(argv[i], "-s") == 0) {
+            int active_option = STRACE_OPTION_SUCCESS;
+
+            strace_option(active_option, -1, 1);
+            exit();
+        } else if (strcmp(argv[i], "-f") == 0) {
+            int active_option = STRACE_OPTION_FAIL;
+            strace_option(active_option, -1, 1);
+            exit();
+        }
+    }
 
     // Handle "on" or "off" tracing
     if (strcmp(argv[1], "on") == 0) {
@@ -138,6 +123,8 @@ int main(int argc, char *argv[]) {
         } else {
             // Parent process: Wait for child
             wait();
+            strace(0);
+            exit();
         }
     }
     else if (strcmp(argv[1], "dump") == 0) {
