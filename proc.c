@@ -178,8 +178,11 @@ fork(void)
   np->sz = proc->sz;
   np->parent = proc;
   *np->tf = *proc->tf;
-  //np->strace_flag = proc->strace_flag; //Inherit strace flag
-  // np->strace_state = proc->strace_state; //Inherit strace state
+  np->strace_flag = proc->strace_flag; //Inherit strace flag
+  np->strace_option.active_option = proc->strace_option.active_option; //Inherit strace option
+  np->strace_option.syscall_filter_id = proc->strace_option.syscall_filter_id; //Inherit strace option
+  np->strace_option.option_call = proc->strace_option.option_call; //Inherit strace option
+
 
 
 
@@ -245,8 +248,18 @@ exit(void)
 
   // Log the exit system call if tracing is enabled
   if(proc->strace_flag) {
-    cprintf("TRACE: pid = %d | command_name = %s | syscall = exit\n",
-            proc->pid, proc->name);
+    if(proc->parent->strace_option.option_call == 1) {
+      proc->parent->strace_option.option_call = 2;
+    }
+    else if(proc->parent->strace_option.option_call == 2) {
+      proc->parent->strace_option.option_call = 0;
+      proc->parent->strace_option.active_option = STRACE_OPTION_NONE;
+      proc->parent->strace_option.syscall_filter_id = -1;
+    }
+    else{
+        cprintf("TRACE: pid = %d | command_name = %s | syscall = exit\n",
+          proc->pid, proc->name);
+    }
   }
 
 
