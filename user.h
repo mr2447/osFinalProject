@@ -25,6 +25,7 @@ int sleep(int);
 int uptime(void);
 int strace(int);
 int strace_dump(void);
+int strace_option(int, int, int);
 
 // ulib.c
 int stat(char*, struct stat*);
