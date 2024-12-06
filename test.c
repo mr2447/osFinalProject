@@ -24,3 +24,11 @@ int main(void) {
     //strace(0);      // Disable tracing
     exit();
 }
+
+//shows a failed test call
+// int main(void) {
+//     open("nonexistent_file.txt", 0);
+//     exit();
+
+    
+// }
