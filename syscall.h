@@ -22,3 +22,4 @@
 #define SYS_close  21
 #define SYS_strace 22
 #define SYS_strace_dump 23
+#define SYS_strace_option 24
