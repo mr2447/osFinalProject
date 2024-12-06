@@ -75,18 +75,8 @@ int main(int argc, char *argv[]) {
            int active_option = STRACE_OPTION_FILTER;
             int syscall_filter_id = syscall_number_from_name(argv[++i]);
             int option_call = 1;
-            int pid = fork();
-            if (pid == 0) {
-                strace_option(active_option, syscall_filter_id, option_call);
-                exec(argv[2], &argv[2]);
-                printf(1,"exec failed\n");
-                exit();
-            }
-            else {
-                wait();
-            }
-            //strace_option(active_option, syscall_filter_id, option_call);
-            //exit();
+            strace_option(active_option, syscall_filter_id, option_call);
+            exit();
         } else if (strcmp(argv[i], "-s") == 0) {
             int active_option = STRACE_OPTION_SUCCESS;
 
@@ -98,6 +88,7 @@ int main(int argc, char *argv[]) {
             exit();
         }
     }
+
 
     // Handle "on" or "off" tracing
     if (strcmp(argv[1], "on") == 0) {
