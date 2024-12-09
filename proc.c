@@ -6,16 +6,27 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
-
-//int strcmp(const char *s1, const char *s2);
-
+#include "strace.h" //Includes the size of the buffer
 
 
 
 
-// void trace_syscall(struct proc *p, int syscall_num, int return_value) {
+// Circular buffer to store system call events
+struct strace_event strace_buffer[N];
+int strace_buffer_index = 0; // Points to the current index in the buffer
 
-// }
+void log_strace_event(int pid, const char *name, const char *syscall, int retval) {
+    struct strace_event *event = &strace_buffer[strace_buffer_index];
+
+    // Update the circular buffer index
+    strace_buffer_index = (strace_buffer_index + 1) % N;
+
+    // Populate the event structure
+    event->pid = pid;
+    safestrcpy(event->name, name, sizeof(event->name));
+    safestrcpy(event->syscall, syscall, sizeof(event->syscall));
+    event->retval = retval;
+}
 
 struct {
   struct spinlock lock;
@@ -59,6 +70,11 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->strace_flag = 0; //Initialize strace flag
+  p->strace_option.fail = 0; //Initialize strace option
+  p->strace_option.success = 0; //Initialize strace option
+  p->strace_option.syscall_filter_id = -1; //Initialize strace option
+  p->strace_option.option_call = 0; //Initialize strace option
 
   release(&ptable.lock);
 
@@ -168,6 +184,12 @@ fork(void)
   np->sz = proc->sz;
   np->parent = proc;
   *np->tf = *proc->tf;
+  np->strace_flag = proc->strace_flag; //Inherit strace flag
+  np->strace_option = proc->strace_option; //Inherit strace option
+  np->strace_fd = proc->strace_fd; //Inherit strace file descriptor
+
+
+
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -205,8 +227,10 @@ exit(void)
   // Close all open files.
   for(fd = 0; fd < NOFILE; fd++){
     if(proc->ofile[fd]){
-      fileclose(proc->ofile[fd]);
-      proc->ofile[fd] = 0;
+        if(fd != proc->strace_fd) { // Skip strace_fd
+            fileclose(proc->ofile[fd]);
+            proc->ofile[fd] = 0;
+        }
     }
   }
 
@@ -230,10 +254,43 @@ exit(void)
   }
 
   // Log the exit system call if tracing is enabled
-  if(proc->strace_enabled) {
-    cprintf("TRACE: pid = %d | command_name = %s | syscall = exit\n",
-            proc->pid, proc->name);
+  if(proc->strace_flag) {
+    if(proc->parent->strace_option.option_call == 1) { //Only for the process that sets the option
+      proc->parent->strace_option.option_call = 2;
+      // cprintf("file descriptor proc.c: %d\n", proc->strace_fd);
+      // cprintf("parents file descriptor proc.c: %d\n", proc->parent->strace_fd);
+    }
+    else if(proc->parent->strace_option.option_call == 2 && proc->parent->pid == 2) { //Only for process that sh created to run the call with the option
+      proc->parent->strace_option.option_call = 0;
+      proc->parent->strace_option.syscall_filter_id = -1;
+      proc->parent->strace_option.success = 0;
+      proc->parent->strace_option.fail = 0;
+      // cprintf("file descriptor proc.c 2: %d\n", proc->strace_fd);
+      // cprintf("parents file descriptor proc.c 2: %d\n", proc->parent->strace_fd);
+//       if (proc->ofile[proc->strace_fd]) {
+//     fileclose(proc->ofile[proc->strace_fd]);
+//     proc->ofile[proc->strace_fd] = 0;
+//      }
+    }
+    else if(proc->parent->strace_option.option_call == 2 && proc->parent->pid != 2) {} //Only for forked processes of the above process
+    else{ //standard trace exit
+        // if(proc->strace_fd >= 0){
+        //     char buf[256];
+        //     int n = snprintf(buf, sizeof(buf), 
+        //                      "TRACE: pid = %d | command_name = %s | syscall = exit\n",
+        //                      proc->pid, proc->name);
+            
+        //     if (proc->ofile[proc->strace_fd]) {
+        //         filewrite(proc->ofile[proc->strace_fd], buf, n);
+        //     }
+        // }
+        // if(proc->strace_option.fail != 1)
+        // cprintf("TRACE: pid = %d | command_name = %s | syscall = exit\n",
+        //   proc->pid, proc->name);
+    }
+    // log_strace_event(proc->pid, proc->name, "exit", 0);
   }
+
 
   // Jump into the scheduler, never to return.
   proc->state = ZOMBIE;
