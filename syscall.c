@@ -6,10 +6,7 @@
 #include "proc.h"
 #include "x86.h"
 #include "syscall.h"
-
-// extern void trace_syscall(struct proc *p, int syscall_num, int return_value);
-
-
+#include "strace.h"
 
 // User code makes a system call with INT T_SYSCALL.
 // System call number in %eax.
@@ -103,7 +100,9 @@ extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
 extern int sys_strace(void);
-//extern int sys_strace_dump(void);
+extern int sys_strace_dump(void);
+extern int sys_strace_option(void);
+extern int sys_strace_set_output(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -127,49 +126,210 @@ static int (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
-[SYS_strace]  sys_strace, //Added new system call
-//[SYS_strace_dump] sys_strace_dump,
+[SYS_strace]  sys_strace,
+[SYS_strace_dump] sys_strace_dump,
+[SYS_strace_option] sys_strace_option,
+[SYS_strace_set_output] sys_strace_set_output,
 };
 
 static char *syscall_names[] = {
-    "fork", "exit", "wait", "pipe", "read", "kill", "exec", "fstat", "chdir",
-    "dup", "getpid", "sbrk", "sleep", "uptime", "open", "write", "mknod",
-    "unlink", "link", "mkdir", "close", "strace"
+    [SYS_fork]    "fork",
+    [SYS_exit]    "exit",
+    [SYS_wait]    "wait",
+    [SYS_pipe]    "pipe",
+    [SYS_read]    "read",
+    [SYS_kill]    "kill",
+    [SYS_exec]    "exec",
+    [SYS_fstat]   "fstat",
+    [SYS_chdir]   "chdir",
+    [SYS_dup]     "dup",
+    [SYS_getpid]  "getpid",
+    [SYS_sbrk]    "sbrk",
+    [SYS_sleep]   "sleep",
+    [SYS_uptime]  "uptime",
+    [SYS_open]    "open",
+    [SYS_write]   "write",
+    [SYS_mknod]   "mknod",
+    [SYS_unlink]  "unlink",
+    [SYS_link]    "link",
+    [SYS_mkdir]   "mkdir",
+    [SYS_close]   "close",
+    [SYS_strace]  "strace",
+    [SYS_strace_dump] "strace_dump",
+    [SYS_strace_option] "strace_option",
+    [SYS_strace_set_output] "strace_set_output",
 };
 
-const char *syscall_name(int num) {
-    if (num > 0 && num <= NELEM(syscall_names))
-        return syscall_names[num - 1]; //adjust for the syscall_names being 0 indexed
-    return "unknown";
+void itoa(int num, char *str) {
+    int i = 0, is_negative = 0;
+    if (num == 0) {
+        str[i++] = '0';
+        str[i] = '\0';
+        return;
+    }
+    if (num < 0) {
+        is_negative = 1;
+        num = -num;
+    }
+    while (num != 0) {
+        str[i++] = (num % 10) + '0';
+        num /= 10;
+    }
+    if (is_negative)
+        str[i++] = '-';
+    str[i] = '\0';
+    int j, k;
+    for (j = 0, k = i - 1; j < k; j++, k--) {
+        char temp = str[j];
+        str[j] = str[k];
+        str[k] = temp;
+    }
 }
 
-void
-syscall(void)
-{
+char *strcat(char *dest, const char *src) {
+    char *d = dest;
+    while (*d) d++;           // Move to the end of the destination string
+    while ((*d++ = *src++));  // Copy the source string
+    return dest;
+}
+
+
+// System call handler
+void syscall(void) {
     int num;
 
-    num = proc->tf->eax; // Get the system call number from the trapframe.
+    num = proc->tf->eax; // Get the system call number
+
+    if(num == SYS_exit){
+        if(proc->strace_option.fail == 0 && 
+        (proc->strace_option.syscall_filter_id == -1 || proc->strace_option.syscall_filter_id == SYS_exit)
+        && proc->strace_flag){
+            cprintf("TRACE: pid = %d | command_name = %s | syscall = exit\n",
+            proc->pid, proc->name);
+        }
+        if(proc->strace_flag){
+        log_strace_event(proc->pid, proc->name, "exit", 0);
+        }
+    }
+
     if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
-        // Execute the system call and store the return value
+
         int return_value = syscalls[num](); // Call the system call handler
 
         // Store the return value in the trapframe (for user-space access)
         proc->tf->eax = return_value;
 
-        // If strace is enabled, log the system call
-        if (proc->strace_enabled ) {
-            cprintf("TRACE: pid = %d | command_name = %s | syscall = %s | return value = %d\n",
+        // Get the current process's tracing option
+        //struct strace_option *option = &proc->strace_option;
+        if (proc->strace_flag && proc->pid != 2 && proc->pid != 1) {
+          int success = proc->strace_option.success;
+          int fail = proc->strace_option.fail;
+          int filter = proc->strace_option.syscall_filter_id != -1;
+            // Print the system call details to the console
+            if(filter) { //Check if we have the filter option 
+              if(proc->strace_option.syscall_filter_id == num){//Check if the syscall number is the same as the filter
+                if(success) { //Check if we want to print successful syscalls 
+                  if(return_value >= 0){ //Check if the return value is successful
+                    cprintf("TRACE: pid = %d | command_name = %s | syscall = %s | return value = %d\n",
+                        proc->pid,
+                        proc->name,
+                        syscall_names[num], // System call name
+                        return_value);        // Return value
+                  }
+                }
+                else if(fail) { //Check if we want to print failed syscalls
+                  if(return_value < 0){ //Check if the return value is failed
+                    cprintf("TRACE: pid = %d | command_name = %s | syscall = %s | return value = %d\n",
+                        proc->pid,
+                        proc->name,
+                        syscall_names[num], // System call name
+                        return_value);        // Return value
+                  }
+                }
+                else { //Otherwise we are only printing filtered syscalls
+                  cprintf("TRACE: pid = %d | command_name = %s | syscall = %s | return value = %d\n",
+                      proc->pid,
+                      proc->name,
+                      syscall_names[num], // System call name
+                      return_value);        // Return value
+                }
+              }
+            }
+
+            else if(success) { //Check if we want to print successful syscalls 
+              if(return_value >= 0){ //Check if the return value is successful
+                cprintf("TRACE: pid = %d | command_name = %s | syscall = %s | return value = %d\n",
                     proc->pid,
                     proc->name,
-                    syscall_name(num), // A helper function to convert syscall number to name
-                    return_value);     // Use the return value from the system call
+                    syscall_names[num], // System call name
+                    return_value);        // Return value
+              }
+            }
+            else if(fail) { //Check if we want to print failed syscalls
+              if(return_value < 0){ //Check if the return value is failed
+                cprintf("TRACE: pid = %d | command_name = %s | syscall = %s | return value = %d\n",
+                    proc->pid,
+                    proc->name,
+                    syscall_names[num], // System call name
+                    return_value);        // Return value
+              }
+            }
+// else if (proc->strace_option.active_option == STRACE_OPTION_OUTPUT) {
+//     if (proc->strace_fd >= 0) {
+//         struct file *f = proc->ofile[proc->strace_fd];
+//         if (!f) {
+//             cprintf("Error: File not found for strace_fd %d\n", proc->strace_fd);
+//             return;
+//         }
 
-            // Update the circular buffer index
-            // proc->syscall_index = (proc->syscall_index + 1) % N;
+//         // Prepare the trace message using a buffer
+//         char buf[256];
+//         memset(buf, 0, sizeof(buf)); // Clear the buffer
+
+//         // Write formatted trace message to the buffer
+//         safestrcpy(buf, "TRACE: pid = ", sizeof(buf));
+//         itoa(proc->pid, buf + strlen(buf));
+//         safestrcpy(buf + strlen(buf), " | command_name = ", sizeof(buf) - strlen(buf));
+//         safestrcpy(buf + strlen(buf), proc->name, sizeof(buf) - strlen(buf));
+//         safestrcpy(buf + strlen(buf), " | syscall = ", sizeof(buf) - strlen(buf));
+//         safestrcpy(buf + strlen(buf), syscall_names[num], sizeof(buf) - strlen(buf));
+//         safestrcpy(buf + strlen(buf), " | return value = ", sizeof(buf) - strlen(buf));
+//         itoa(return_value, buf + strlen(buf));
+//         safestrcpy(buf + strlen(buf), "\n", sizeof(buf) - strlen(buf));
+
+//         // Calculate the length of the string
+//         int len = strlen(buf);
+
+//         // Debug buffer content
+//         cprintf("Debug: Trace message: %s", buf);
+
+//         // Write the trace message to the file
+//         int written = filewrite(f, buf, len);
+//         if (written < 0) {
+//             cprintf("Error: filewrite failed\n");
+//         } else if (written < len) {
+//             cprintf("Warning: Incomplete write. Written %d of %d bytes\n", written, len);
+//         } else {
+//             cprintf("Debug: Successfully wrote %d bytes\n", written);
+//         }
+//     } else {
+//         cprintf("Error: Invalid strace_fd\n");
+//     }
+// }
+            
+            else{ //Otherwise we have no options and we are printing all syscalls
+              cprintf("TRACE: pid = %d | command_name = %s | syscall = %s | return value = %d\n",
+                    proc->pid,
+                    proc->name,
+                    syscall_names[num], // System call name
+                    return_value);        // Return value
+            }
+            log_strace_event(proc->pid, proc->name, syscall_names[num], return_value); // Log the event
         }
+
     } else {
-        cprintf("%d %s: unknown sys call %d\n",
-                proc->pid, proc->name, num);
-        proc->tf->eax = -1; // Set return value to -1 for unknown syscalls
+        // Unknown system call
+        cprintf("%d %s: unknown sys call %d\n", proc->pid, proc->name, num);
+        proc->tf->eax = -1;
     }
 }
