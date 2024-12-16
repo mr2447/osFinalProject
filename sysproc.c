@@ -22,18 +22,20 @@ int sys_strace(void) {
         return -1; // Error in retrieving argument
     }
 
+    if (mode != 0 && mode != 1) {
+        return -1; // Invalid argument
+    }
+
     if(mode == 0){ // If strace is being turned off then reset the strace option
         proc->parent->strace_option.syscall_filter_id = -1;
         proc->parent->strace_option.success = 0;
         proc->parent->strace_option.fail = 0;
-        proc->parent->strace_option.option_call = 0;
+        proc->parent->strace_option.first_set = 0;
     }
 
-    // Set the global strace mode
+    // Set the strace flag for the process and its parent
     proc->parent->strace_flag = mode;
     proc->strace_flag = mode;
-    // cprintf("strace flag sysproc: %d\n", proc->strace_flag);
-    // cprintf("proc->pid: %d\n", proc->pid);
     return 0; // Success
 }
 
@@ -41,62 +43,42 @@ int sys_strace_option(void){
     int syscall_filter_id;
     int success;
     int fail;
-    int option_call;
 
     if(proc->strace_flag == 0) { //If strace is not enabled then options don't work
         cprintf("Strace is not enabled\n");
         return -1; // Error in retrieving argument
     }
-
     //Retrieve the active option
     if (argint(0, &syscall_filter_id) < 0) {
         return -1; // Error in retrieving argument
     }
-
     if (argint(1, &success) < 0) {
         return -1; // Error in retrieving argument
     }
-
     if (argint(2, &fail) < 0) {
         return -1; // Error in retrieving argument
     }
-
-    if (argint(3, &option_call) < 0) {
-        return -1; // Error in retrieving argument
+    if(success != 0 && success != 1){
+        cprintf("Invalid success option\n");
+        cprintf("success: %d\n", success);
+        return -1;
     }
+    if(fail != 0 && fail != 1){
+        cprintf("Invalid fail option\n");
+        return -1;
+    }
+    if(success == 1 && fail == 1){
+        cprintf("Cannot have both success and fail options\n");
+        return -1;
+    }
+    int just_set = 1;
 
     // Set sh process's strace option to pass onto next command
     proc->parent->strace_option.syscall_filter_id = syscall_filter_id;
     proc->parent->strace_option.success = success;
     proc->parent->strace_option.fail = fail;
-    proc->parent->strace_option.option_call = option_call;
-    proc->strace_option.option_call = option_call;
-    return 0; // Success
-}
-
-int sys_strace_set_output(void) {
-    int fd;
-
-    if(proc->strace_flag == 0) { //If strace is not enabled then options don't work
-        cprintf("Strace is not enabled\n");
-        return -1; // Error in retrieving argument
-    }
-
-    // Retrieve the file descriptor from user space
-    if (argint(0, &fd) < 0) {
-        return -1; // Invalid argument
-    }
-
-    // Validate the file descriptor
-    if (fd < 0 || fd >= NOFILE || proc->ofile[fd] == 0) {
-        return -1; // Invalid or unopened file descriptor
-    }
-
-    // Save the file descriptor for strace output
-    proc->parent->strace_fd = fd;
-    proc->strace_fd = fd;
-    cprintf("strace_fd: %d\n", proc->strace_fd);
-    cprintf("strace_fd Parent: %d\n", proc->parent->strace_fd);
+    proc->parent->strace_option.first_set = just_set;
+    proc->strace_option.first_set = just_set;
     return 0; // Success
 }
 
