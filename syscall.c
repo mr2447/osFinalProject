@@ -8,6 +8,23 @@
 #include "syscall.h"
 #include "strace.h"
 
+// Circular buffer to store system call events
+struct strace_event strace_buffer[N];
+int strace_buffer_index = 0; // Points to the current index in the buffer
+
+void log_strace_event(int pid, const char *name, const char *syscall, int retval) {
+    struct strace_event *event = &strace_buffer[strace_buffer_index];
+
+    // Update the circular buffer index
+    strace_buffer_index = (strace_buffer_index + 1) % N;
+
+    // Populate the event structure
+    event->pid = pid;
+    safestrcpy(event->name, name, sizeof(event->name));
+    safestrcpy(event->syscall, syscall, sizeof(event->syscall));
+    event->retval = retval;
+}
+
 // User code makes a system call with INT T_SYSCALL.
 // System call number in %eax.
 // Arguments on the stack, from the user call to the C
@@ -102,7 +119,6 @@ extern int sys_uptime(void);
 extern int sys_strace(void);
 extern int sys_strace_dump(void);
 extern int sys_strace_option(void);
-extern int sys_strace_set_output(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -129,7 +145,6 @@ static int (*syscalls[])(void) = {
 [SYS_strace]  sys_strace,
 [SYS_strace_dump] sys_strace_dump,
 [SYS_strace_option] sys_strace_option,
-[SYS_strace_set_output] sys_strace_set_output,
 };
 
 static char *syscall_names[] = {
@@ -157,41 +172,7 @@ static char *syscall_names[] = {
     [SYS_strace]  "strace",
     [SYS_strace_dump] "strace_dump",
     [SYS_strace_option] "strace_option",
-    [SYS_strace_set_output] "strace_set_output",
 };
-
-void itoa(int num, char *str) {
-    int i = 0, is_negative = 0;
-    if (num == 0) {
-        str[i++] = '0';
-        str[i] = '\0';
-        return;
-    }
-    if (num < 0) {
-        is_negative = 1;
-        num = -num;
-    }
-    while (num != 0) {
-        str[i++] = (num % 10) + '0';
-        num /= 10;
-    }
-    if (is_negative)
-        str[i++] = '-';
-    str[i] = '\0';
-    int j, k;
-    for (j = 0, k = i - 1; j < k; j++, k--) {
-        char temp = str[j];
-        str[j] = str[k];
-        str[k] = temp;
-    }
-}
-
-char *strcat(char *dest, const char *src) {
-    char *d = dest;
-    while (*d) d++;           // Move to the end of the destination string
-    while ((*d++ = *src++));  // Copy the source string
-    return dest;
-}
 
 
 // System call handler
@@ -273,50 +254,7 @@ void syscall(void) {
                     syscall_names[num], // System call name
                     return_value);        // Return value
               }
-            }
-// else if (proc->strace_option.active_option == STRACE_OPTION_OUTPUT) {
-//     if (proc->strace_fd >= 0) {
-//         struct file *f = proc->ofile[proc->strace_fd];
-//         if (!f) {
-//             cprintf("Error: File not found for strace_fd %d\n", proc->strace_fd);
-//             return;
-//         }
-
-//         // Prepare the trace message using a buffer
-//         char buf[256];
-//         memset(buf, 0, sizeof(buf)); // Clear the buffer
-
-//         // Write formatted trace message to the buffer
-//         safestrcpy(buf, "TRACE: pid = ", sizeof(buf));
-//         itoa(proc->pid, buf + strlen(buf));
-//         safestrcpy(buf + strlen(buf), " | command_name = ", sizeof(buf) - strlen(buf));
-//         safestrcpy(buf + strlen(buf), proc->name, sizeof(buf) - strlen(buf));
-//         safestrcpy(buf + strlen(buf), " | syscall = ", sizeof(buf) - strlen(buf));
-//         safestrcpy(buf + strlen(buf), syscall_names[num], sizeof(buf) - strlen(buf));
-//         safestrcpy(buf + strlen(buf), " | return value = ", sizeof(buf) - strlen(buf));
-//         itoa(return_value, buf + strlen(buf));
-//         safestrcpy(buf + strlen(buf), "\n", sizeof(buf) - strlen(buf));
-
-//         // Calculate the length of the string
-//         int len = strlen(buf);
-
-//         // Debug buffer content
-//         cprintf("Debug: Trace message: %s", buf);
-
-//         // Write the trace message to the file
-//         int written = filewrite(f, buf, len);
-//         if (written < 0) {
-//             cprintf("Error: filewrite failed\n");
-//         } else if (written < len) {
-//             cprintf("Warning: Incomplete write. Written %d of %d bytes\n", written, len);
-//         } else {
-//             cprintf("Debug: Successfully wrote %d bytes\n", written);
-//         }
-//     } else {
-//         cprintf("Error: Invalid strace_fd\n");
-//     }
-// }
-            
+            }          
             else{ //Otherwise we have no options and we are printing all syscalls
               cprintf("TRACE: pid = %d | command_name = %s | syscall = %s | return value = %d\n",
                     proc->pid,
