@@ -23,4 +23,3 @@
 #define SYS_strace 22
 #define SYS_strace_dump 23
 #define SYS_strace_option 24
-#define SYS_strace_set_output 25
