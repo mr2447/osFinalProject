@@ -1,212 +1,76 @@
-#include "types.h"
-#include "stat.h"
-#include "user.h"
+// Per-CPU state
+struct cpu {
+  uchar apicid;                // Local APIC ID
+  struct context *scheduler;   // swtch() here to enter scheduler
+  struct taskstate ts;         // Used by x86 to find stack for interrupt
+  struct segdesc gdt[NSEGS];   // x86 global descriptor table
+  volatile uint started;       // Has the CPU started?
+  int ncli;                    // Depth of pushcli nesting.
+  int intena;                  // Were interrupts enabled before pushcli?
+
+  // Cpu-local storage variables; see below
+  struct cpu *cpu;
+  struct proc *proc;           // The currently-running process.
+};
+
+extern struct cpu cpus[NCPU];
+extern int ncpu;
+
+// Per-CPU variables, holding pointers to the
+// current cpu and to the current process.
+// The asm suffix tells gcc to use "%gs:0" to refer to cpu
+// and "%gs:4" to refer to proc.  seginit sets up the
+// %gs segment register so that %gs refers to the memory
+// holding those two variables in the local cpu's struct cpu.
+// This is similar to how thread-local variables are implemented
+// in thread libraries such as Linux pthreads.
+extern struct cpu *cpu asm("%gs:0");       // &cpus[cpunum()]
+extern struct proc *proc asm("%gs:4");     // cpus[cpunum()].proc
+
+//PAGEBREAK: 17
+// Saved registers for kernel context switches.
+// Don't need to save all the segment registers (%cs, etc),
+// because they are constant across kernel contexts.
+// Don't need to save %eax, %ecx, %edx, because the
+// x86 convention is that the caller has saved them.
+// Contexts are stored at the bottom of the stack they
+// describe; the stack pointer is the address of the context.
+// The layout of the context matches the layout of the stack in swtch.S
+// at the "Switch stacks" comment. Switch doesn't save eip explicitly,
+// but it is on the stack and allocproc() manipulates it.
+struct context {
+  uint edi;
+  uint esi;
+  uint ebx;
+  uint ebp;
+  uint eip;
+};
+
+enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+
 #include "strace.h"
-#include "fcntl.h"
 
-// Static array mapping syscall names to their numbers
-struct syscall_map {
-    const char *name;
-    int number;
+// Per-process state
+struct proc {
+  uint sz;                     // Size of process memory (bytes)
+  pde_t* pgdir;                // Page table
+  char *kstack;                // Bottom of kernel stack for this process
+  enum procstate state;        // Process state
+  int pid;                     // Process ID
+  struct proc *parent;         // Parent process
+  struct trapframe *tf;        // Trap frame for current syscall
+  struct context *context;     // swtch() here to run process
+  void *chan;                  // If non-zero, sleeping on chan
+  int killed;                  // If non-zero, have been killed
+  struct file *ofile[NOFILE];  // Open files
+  struct inode *cwd;           // Current directory
+  char name[16];               // Process name (debugging)
+  int strace_flag;             // Strace flag
+  struct strace_option strace_option; // Strace option
 };
 
-// Example syscall mapping
-static struct syscall_map syscall_table[] = {
-    {"fork", 1},
-    {"exit", 2},
-    {"wait", 3},
-    {"pipe", 4},
-    {"read", 5},
-    {"kill", 6},
-    {"exec", 7},
-    {"fstat", 8},
-    {"chdir", 9},
-    {"dup", 10},
-    {"getpid", 11},
-    {"sbrk", 12},
-    {"sleep", 13},
-    {"uptime", 14},
-    {"open", 15},
-    {"write", 16},
-    {"mknod", 17},
-    {"unlink", 18},
-    {"link", 19},
-    {"mkdir", 20},
-    {"close", 21},
-    {"strace", 22}, 
-    {"strace_dump", 23}, 
-    {"strace_option", 24}, 
-    {"strace_set_output", 25}, 
-    {0, -1} // Sentinel value
-};
-
-int syscall_number_from_name(const char *name) {
-    int i;
-    for (i = 0; syscall_table[i].name != 0; i++) {
-        if (strcmp(syscall_table[i].name, name) == 0) {
-            return syscall_table[i].number;
-        }
-    }
-    return -1; // Return -1 if the name is not found
-}
-
-
-void usage() {
-    printf(1,"Usage:\n");
-    printf(1,"  strace on\n");
-    printf(1,"  strace off\n");
-    printf(1,"  strace run <command> [args...]\n");
-    printf(1,"  strace dump\n");
-    printf(1,"  strace -e <syscall_name>\n");
-    printf(1,"  strace -s\n");
-    printf(1,"  strace -f\n");
-    printf(1,"  strace -o <filename>\n");
-    exit();
-}
-
-int main(int argc, char *argv[]) {
-    //struct strace_option option; // Store parsed options
-    // static int temporary_override = 0; // Tracks temporary overrides
-
-   
-
-    if (argc < 2) {
-        usage();
-        exit();
-    }
-
-
-    if (strcmp(argv[1], "-s") == 0) {
-        if((strcmp(argv[2], "-e") == 0) && argc == 4) { //-s and -e
-            int syscall_filter_id = syscall_number_from_name(argv[3]);
-            if(syscall_filter_id == -1) {
-                printf(1, "Invalid syscall name: %s\n", argv[3]);
-                exit();
-            }
-            strace_option(syscall_filter_id, STRACE_OPTION_SUCCESS, STRACE_OPTION_NONE, 1);
-            exit();
-        }
-        else if(argc == 2){ //only -s
-            strace_option(-1, STRACE_OPTION_SUCCESS, STRACE_OPTION_NONE, 1);
-            exit();
-        }
-        else{ //wrong format
-            usage();
-            exit();
-            
-        }
-    }
-    else if (strcmp(argv[1], "-f") == 0) {
-        if(strcmp(argv[2], "-e") == 0 && argc == 4) { //-f and -e
-            int syscall_filter_id = syscall_number_from_name(argv[3]);
-            if(syscall_filter_id == -1) {
-                printf(1, "Invalid syscall name: %s\n", argv[3]);
-                exit();
-            }
-            strace_option(syscall_filter_id, STRACE_OPTION_NONE, STRACE_OPTION_FAIL, 1);
-            exit();
-        }
-        else if(argc == 2){ //only -f
-            strace_option(-1, STRACE_OPTION_NONE, STRACE_OPTION_FAIL, 1);
-            exit();
-        }
-        else{ //wrong format
-            usage();
-            exit();
-        }
-    }
-    else if (strcmp(argv[1], "-e") == 0 && argc == 3) {
-        int syscall_filter_id = syscall_number_from_name(argv[2]);
-        if(syscall_filter_id == -1) {
-            printf(1, "Invalid syscall name: %s\n", argv[2]);
-            exit();
-        }
-        strace_option(syscall_filter_id, STRACE_OPTION_NONE, STRACE_OPTION_NONE, 1);
-        exit();
-    }
-   
-            
-        
-
-    // // Parse options
-    // int i;
-    // for (i = 1; i < argc; i++) {
-    //     if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) {
-    //        int active_option = STRACE_OPTION_FILTER;
-    //         int syscall_filter_id = syscall_number_from_name(argv[++i]);
-    //         if(syscall_filter_id == -1) {
-    //             printf(1, "Invalid syscall name: %s\n", argv[i]);
-    //             exit();
-    //         }
-    //         strace_option(active_option, syscall_filter_id, 1);
-    //         exit();
-    //     } else if (strcmp(argv[i], "-s") == 0) {
-    //         int active_option = STRACE_OPTION_SUCCESS;
-
-    //         strace_option(active_option, -1, 1);
-    //         exit();
-    //     } else if (strcmp(argv[i], "-f") == 0) {
-    //         int active_option = STRACE_OPTION_FAIL;
-    //         strace_option(active_option, -1, 1);
-    //         exit();
-    //     } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc){
-    //         const char *filename = argv[++i];
-    //         // Open the file for writing
-    //         printf(1, "Opening file: %s\n", filename);
-    //         int fd = open((char *)filename, O_CREATE | O_WRONLY);
-    //         printf(1, "File descriptor: %d\n", fd);
-    //         if(fd < 0) {
-    //             printf(1, "Failed to open file: %s\n", filename);
-    //             exit();
-    //         }
-    //         // Set the output file descriptor
-    //         if(strace_set_output(fd) < 0) {
-    //             printf(1, "Failed to set output file\n");
-    //             exit();
-    //         }
-    //         strace_option(STRACE_OPTION_OUTPUT, -1, 1);
-    //         exit();
-    //     }
-
-    //}
-
-    // Handle "on" or "off" tracing
-    if (strcmp(argv[1], "on") == 0 && argc == 2) {
-        strace(1);  // Enable strace
-        exit();
-        
-    }
-    else if (strcmp(argv[1], "off") == 0 && argc == 2) {
-        strace(0);  // Disable strace
-        exit();
-    }
-    // Handle "run" to enable tracing and execute a command
-    else if (strcmp(argv[1], "run") == 0) {
-        if (argc < 3) {
-            usage();
-        }
-
-        int pid = fork();
-        if (pid == 0) {
-            // Child process: Enable per-process tracing and run command
-            strace(1);
-            exec(argv[2], &argv[2]);
-            printf(1,"exec failed\n");
-            exit();
-        } else {
-            // Parent process: Wait for child
-            wait();
-            strace(0);
-            exit();
-        }
-    }
-    else if (strcmp(argv[1], "dump") == 0 && argc == 2) {
-        strace_dump();  // Call the kernel to print the syscall log
-        exit();
-    }
-    else {
-        usage();
-    }
-
-    exit();
-}
+// Process memory is laid out contiguously, low addresses first:
+//   text
+//   original data and bss
+//   fixed-size stack
+//   expandable heap
